@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 type AsyncStatus = 'idle' | 'pending' | 'success' | 'error';
 
@@ -7,18 +7,39 @@ export function useAsync<T>(asyncFn: () => Promise<T>) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<Error | null>(null);
 
-  useEffect(() => {
-    setStatus('pending');
-    asyncFn()
-      .then((result) => {
+  const run = useCallback(
+    async (signal?: AbortSignal) => {
+      setStatus('pending');
+      setError(null);
+      setData(null);
+
+      try {
+        const result = await asyncFn();
+        if (signal?.aborted) return;
+
         setData(result);
         setStatus('success');
-      })
-      .catch((err) => {
+      } catch (err) {
+        if (signal?.aborted) return;
+
         setError(err as Error);
         setStatus('error');
-      });
-  }, [asyncFn]);
+      }
+    },
+    [asyncFn]
+  );
 
-  return { status, data, error } as const;
+  useEffect(() => {
+    const abortController = new AbortController();
+    const timeoutId = setTimeout(() => {
+      void run(abortController.signal);
+    });
+
+    return () => {
+      abortController.abort();
+      clearTimeout(timeoutId);
+    };
+  }, [run]);
+
+  return { status, data, error, refresh: run } as const;
 }
